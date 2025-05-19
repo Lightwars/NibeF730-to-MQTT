@@ -193,14 +193,14 @@ void NibeGw::loop() {
 
     case STATE_OK_MESSAGE_RECEIVED:
       // now clear double 0x5C, which are to indicate a real value of 0x5C
-	    for (int i = 5; i < index-1; i++) {
-        if(buffer[i]==0x5C && buffer[i+1]==0x5C) {
-          memmove(&buffer[i], &buffer[i+1], index -2 - i);
+      for (int i = 5; i < index - 1; i++) {
+        if (buffer[i] == 0x5C && buffer[i + 1] == 0x5C) {
+          memmove(&buffer[i], &buffer[i + 1], index - 2 - i);
           buffer[4] -= 1;
         }
       }
       index = buffer[4] + 6;
-      
+
       if (buffer[0] == 0x5C && buffer[1] == 0x00 && buffer[2] == 0x20 && buffer[4] == 0x00 && (buffer[3] == 0x69 || buffer[3] == 0x6B)) {
 
         eTokenType token = buffer[3] == 0x6B ? WRITE_TOKEN : READ_TOKEN;
@@ -227,9 +227,21 @@ void NibeGw::loop() {
           debug(1, "Message received\n");
         }
 #endif
+        if ((buffer[2] == 0x20) && (buffer[3] == 0xEE)) {
+          // Sending Modbus Version v10
+          buffer[0] = 0xC0;
+          buffer[1] = 0xEE;
+          buffer[2] = 0x03;
+          buffer[3] = 0x0A;
+          buffer[4] = 0x00;
+          buffer[5] = 0x02;
+          buffer[6] = 0x25;
+          sendData(buffer, (byte)7);
+        }
         if ((buffer[2] == 0x19) || (buffer[2] == 0x1A) || (buffer[2] == 0x1B) || (buffer[2] == 0x1C)) {  // rmu
-          if (buffer[3] == 0x60) {                                                                       // send data message
-            int msglen = callback_msg_token_received(RMU_TOKEN, buffer);
+          if ((buffer[3] == 0x60) || (buffer[3] == 0x62)) {                                              // send data message
+            eTokenType token = buffer[3] == 0x60 ? RMU_WRITE_TOKEN : RMU_TOKEN;
+            int msglen = callback_msg_token_received(token, buffer);
             if (msglen > 0) {
               sendData(buffer, (byte)msglen);
             } else {
@@ -241,27 +253,98 @@ void NibeGw::loop() {
                 sendAck();
             }
           } else if (buffer[3] == 0x63) {
-            buffer[0] = 192;
-            buffer[1] = 96;
-            buffer[2] = 2;
-            buffer[3] = 99;
-            buffer[4] = 0;
-            buffer[5] = 193;
+            buffer[0] = 0xC0;
+            buffer[1] = 0x60;
+            buffer[2] = 0x02;
+            buffer[3] = 0x63;
+            buffer[4] = 0x00;
+            buffer[5] = 0xC1;
             sendData(buffer, (byte)6);
           } else if (buffer[3] == 0xEE) {
             // Sending RMU Version v259
-            buffer[0] = 192;
-            buffer[1] = 238;
-            buffer[2] = 3;
-            buffer[3] = 238;
-            buffer[4] = 3;
-            buffer[5] = 1;
-            buffer[6] = 193;
+            buffer[0] = 0xC0;
+            buffer[1] = 0xEE;
+            buffer[2] = 0x03;
+            buffer[3] = 0xEE;
+            buffer[4] = 0x03;
+            buffer[5] = 0x01;
+            buffer[6] = 0xC1;
             sendData(buffer, (byte)7);
           } else {
             if (shouldAckNakSend(buffer[2]))
               sendAck();
           }
+        }
+        if (buffer[2] == 0xA4) {  // eme20
+          // for(int bufin = 0; bufin < index; bufin++) {
+          //   Serial.printf("%02x", buffer[bufin]);
+          // }
+          // Serial.println();
+          // if (buffer[3] == 0xEE) {
+          //   // Sending EME20 Version v???
+          //   buffer[0] = 0xC0;
+          //   buffer[1] = 0xEE;
+          //   buffer[2] = 0x03;
+          //   buffer[3] = 0x01;
+          //   buffer[4] = 0x00;
+          //   buffer[5] = 0x03;
+          //   buffer[6] = 0x2F;
+          //   sendData(buffer, (byte)7);
+          // } else {
+            int msglen = callback_msg_token_received(EME20_TOKEN, buffer);
+            if (msglen > 0) {
+              sendData(buffer, (byte)msglen);
+            } else {
+              if (shouldAckNakSend(buffer[2]))
+                sendAck();
+            }
+          // }
+          // if (buffer[3] == 0x50) {
+          //   // Sending EME20 ??? select pv?
+          //   buffer[0] = 0xC0;
+          //   buffer[1] = 0x50;
+          //   buffer[2] = 0x02;
+          //   buffer[3] = 0x00;
+          //   buffer[4] = 0x00;
+          //   buffer[5] = 0x92; // 0x90 ^ 0x02
+          //   sendData(buffer, (byte)6);
+          // } else if (buffer[3] == 0x60) {
+          //   // Sending EME20 ???
+          //   buffer[0] = 0xC0;
+          //   buffer[1] = 0x60;
+          //   buffer[2] = 0x11; // length should be at least 17 or 18
+          //   buffer[3] = 0x00; // voltage string 1 low byte /10
+          //   buffer[4] = 0x00; // voltage string 1 high byte /10
+          //   buffer[5] = 0x00; // voltage string 2 low byte /10
+          //   buffer[6] = 0x00; // voltage string 2 high byte /10
+          //   buffer[7] = 0x00; // low byte power
+          //   buffer[8] = 0x00; // high byte power
+          //                     // low byte temperature /10
+          //                     // high byte temperature /10
+          //                     // fehler code niedrig low byte
+          //                     // fehler code niedrig high byte
+          //                     // fehler code hoch low byte
+          //                     // fehler code hoch high byte
+          //                     // 1 byte energy
+          //                     // 2 byte energy
+          //                     // 3 byte energy
+          //                     // 4 byte energy
+          //                     // com percentage -> 1 byte 
+          //   buffer[9] = 0xA2; // 0x90 ^ 0x02
+          //   sendData(buffer, (byte)6);
+          // } else if (buffer[3] == 0x70) {
+          //   // Sending EME20 ???
+          //   buffer[0] = 0xC0; // {2:{112,2,0,0,2,0,10,0,0,0}
+          //   buffer[1] = 0x70;
+          //   buffer[2] = 0x02;
+          //   buffer[3] = 0x00;
+          //   buffer[4] = 0x00;
+          //   buffer[5] = 0xB2;
+          //   sendData(buffer, (byte)6);
+          // } else {
+          //   if (shouldAckNakSend(buffer[2]))
+          //     sendAck();
+          // }
         } else {
           if (shouldAckNakSend(buffer[2]))
             sendAck();
@@ -384,6 +467,8 @@ boolean NibeGw::shouldAckNakSend(byte address) {
     else if (address == RMU40 && ackRmu40)
       return true;
     else if (address == SMS40 && ackSms40)
+      return true;
+    else if (address == EME20)
       return true;
   }
 

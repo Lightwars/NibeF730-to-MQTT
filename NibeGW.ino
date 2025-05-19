@@ -26,7 +26,7 @@
  *  29.7.2022   v5.00   New configuration model and PRODINo ESP32 Ethernet v1 support with OTA update
  */
 
-#define VERSION   "5.00"
+#define VERSION   "5.01"
 
 // ######### INCLUDES #######################
 
@@ -92,29 +92,35 @@ EthernetUDP udp4writeCmnds;
 #endif
 
 #if defined(ESP32_BOARD)
- // more functions and variables
- static void initRegisterFuel();
- void onReadRegisterReq(const String& topic, const String& message);
- void onWriteRegisterReq(const String& topic, const String& message);
- void onLoglevelSet(const String& topic, const String& message);
- void onAddRegisterSet(const String& topic, const String& message);
- void writeToMqtt(const byte* const data, int len);
+// more functions and variables
+static void initRegisterFuel();
+void onReadRegisterReq(const String& topic, const String& message);
+void onWriteRegisterReq(const String& topic, const String& message);
+void onLoglevelSet(const String& topic, const String& message);
+void onAddRegisterSet(const String& topic, const String& message);
+void onEme20Set(const String& topic, const String& message);
+void writeToMqtt(const byte* const data, int len);
 
- #define RINGBUFSIZE 10
- static byte readReq[RINGBUFSIZE][6];
- static uint8_t readFill = 0;
- static uint8_t readDrain = 0;
- static byte writeReq[RINGBUFSIZE][10];
- static uint8_t writeFill = 0;
- static uint8_t writeDrain = 0;
- static byte rmuReq[RINGBUFSIZE][8] = {0};
- enum rmuType_e {RMUNONE = 0, RMU1 = 0x19, RMU2, RMU3, RMU4};
- //uint8_t mqttPublishTimer = 5;
- static esp_task_wdt_config_t wdt_config = {
-   .timeout_ms = 2 * 1000,
-   .trigger_panic = true,
- };
- static int logLevel = 0;
+#define RINGBUFSIZE 10
+static byte readReq[RINGBUFSIZE][6];
+static uint8_t readFill = 0;
+static uint8_t readDrain = 0;
+static byte writeReq[RINGBUFSIZE][10];
+static uint8_t writeFill = 0;
+static uint8_t writeDrain = 0;
+static byte rmuReq[RINGBUFSIZE][8] = { 0 };
+enum rmuType_e { RMUNONE = 0,
+                 RMU1 = 0x19,
+                 RMU2,
+                 RMU3,
+                 RMU4 };
+static byte emeReq[4][20] = {{0x50, 2, 1, 0}, {0x60, 17, 64,31, 0,0, 0,0, 164,1, 0,0, 0,0, 0,0,0,0, 0}, {0x70, 6, 0, 0, 0, 0, 0, 0}, {0xee,0x3,0x2a,0x0,0x3}};
+//uint8_t mqttPublishTimer = 5;
+static esp_task_wdt_config_t wdt_config = {
+  .timeout_ms = 2 * 1000,
+  .trigger_panic = true,
+};
+static int logLevel = 0;
 #endif
 
 // ######### SETUP #######################
@@ -510,7 +516,36 @@ int nibeCallbackTokenReceived(eTokenType token, byte* data) {
           client.publish("nibeF730/log", data_s);
         }
       }
-    #endif
+	#endif
+    } else if (token == EME20_TOKEN) {
+      DEBUG_PRINT_MSG(3, "EME20 token received from nibe\n");
+	#if defined(ESP32_BOARD)
+      int emeRed;
+      switch(data[3]) {
+        case 0x50:
+          emeRed = 0;
+          break;
+        case 0x60:
+          emeRed = 1;
+          break;
+        case 0x70:
+          emeRed = 2;
+          break;
+        case 0xEE:
+          emeRed = 3;
+          break;
+      }
+      data[0] = 0xC0;
+      for(int index = 0; index < (emeReq[emeRed][1] + 2); index++) {
+        data[index + 1] = emeReq[emeRed][index];
+        // Serial.printf("%02x", data[index]);
+      }
+      data[data[2] + 3] = calcCrc2(data, data[2]);
+      len = data[2] + 4;
+      // Serial.printf("%02x", data[data[2] + 2]);
+      // Serial.printf("%02x", data[data[2] + 3]);
+      // Serial.println();
+	#endif
     }
 
     #if defined(PRODINO_BOARD_ESP32)
@@ -694,6 +729,8 @@ static nibeF730Registers_t NIBEF730REGISTER[NUMBER_OF_REGS] = {
   {40032, 10,S16}, // //R
   {40050, 10,S16}, // //R
   {40051,100,S16}, // //R
+  {40077, 10, S16}, // //R
+  {40078, 10, S16}, // //R
   {40079, 10,U32}, // EB100-BE3 Current //R
   {40081, 10,U32}, // EB100-BE2 Current //R
   {40083, 10,U32}, // EB100-BE1 Current //R
@@ -737,7 +774,7 @@ typedef struct nibeRegs_s {
   dataSize_t size;
 } nibeRegs_t;
 
-static uint8_t regFuel = 41;
+static uint8_t regFuel = 43;
 
 static void initRegisterFuel()
 {
@@ -753,7 +790,7 @@ static void initRegisterFuel()
 static byte calcCrc(byte* data, uint8_t datalen)
 {
   byte calc_checksum = 0;
-      
+
   // calculate XOR checksum
   for(int i = 2; i < (datalen + 5); i++) {
     calc_checksum ^= data[i];
@@ -764,7 +801,7 @@ static byte calcCrc(byte* data, uint8_t datalen)
 static byte calcCrc2(byte* data, uint8_t datalen)
 {
   byte calc_checksum = 0;
-      
+
   // calculate XOR checksum
   for(int i = 0; i < (datalen + 3); i++) {
     calc_checksum ^= data[i];
@@ -779,6 +816,7 @@ void onConnectionEstablished()
   client.subscribe("nibeF730/write/#", onWriteRegisterReq);
   client.subscribe("nibeF730/loglevel/set", onLoglevelSet);
   client.subscribe("nibeF730/add", onAddRegisterSet);
+  client.subscribe("nibeF730/eme20/set", onEme20Set);
   onLoglevelSet("", String(0));
   Serial.println("connected");
 }
@@ -896,20 +934,53 @@ void onAddRegisterSet(const String& topic, const String& message)
 {
   String subString = message.substring(13);
   uint16_t subInt = subString.toInt();
+  char data_s[32] = { 0 };
 
   if (regFuel < NUMBER_OF_REGS) {
     NIBEF730REGISTER[regFuel].regAddress = subInt;
-    subInt = message.indexOf("factor") + 3;
+    subInt = message.indexOf("factor") + 9;
     subString = message.substring(subInt);
     NIBEF730REGISTER[regFuel].factor = subString.toInt();
-    subInt = message.indexOf("size") + 3;
+    subInt = message.indexOf("size") + 7;
     subString = message.substring(subInt);
     NIBEF730REGISTER[regFuel].size = (dataSize_t)subString.toInt();
-    regFuel++;
-  } else if(logLevel) {
-      char data_s[32] = {0};
-      sprintf(data_s, "add %d not possible at %d", subInt, regFuel);
+    if (logLevel) {
+      sprintf(data_s, "r:%d f:%d s:%d", NIBEF730REGISTER[regFuel].regAddress, NIBEF730REGISTER[regFuel].factor, NIBEF730REGISTER[regFuel].size);
       client.publish("nibeF730/logerror", data_s);
+    }
+    regFuel++;
+  } else if (logLevel) {
+    sprintf(data_s, "add %d not possible at %d", subInt, regFuel);
+    client.publish("nibeF730/logerror", data_s);
+  }
+}
+/* message: {0:{80,4,1,2,3,4}} */
+void onEme20Set(const String& topic, const String& message) {
+  String subString = message.substring(1);
+  uint16_t subInt;
+  uint16_t eme20Req = subString.toInt();
+  uint16_t length;
+  char data_s[21] = { 0 };
+
+  subInt = message.indexOf("{", 1) + 1;
+  subString = message.substring(subInt);
+  emeReq[eme20Req][0] = subString.toInt();
+  subInt = message.indexOf(",", subInt) + 1;
+  subString = message.substring(subInt);
+  emeReq[eme20Req][1] = length = subString.toInt();
+  if (logLevel) {
+      sprintf(data_s, "%02x%02x", emeReq[eme20Req][0], emeReq[eme20Req][1]);
+  }
+  for(uint16_t index = 0; index < length; index++) {
+    subInt = message.indexOf(",", subInt) + 1;
+    subString = message.substring(subInt);
+    emeReq[eme20Req][index+2] = subString.toInt();
+     if (logLevel) {
+      sprintf(data_s, "%s%02x", data_s, emeReq[eme20Req][index+2]);
+    }
+  }
+  if (logLevel) {
+    client.publish("nibeF730/logerror", data_s);
   }
 }
 

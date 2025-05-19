@@ -20,9 +20,23 @@
  *
  *  Address: 
  *    0x16 = SMS40
- *    0x19 = RMU40
+ *    0x19 = RMU40 S1
+ *    0x1A = RMU40 S2
+ *    0x1B = RMU40 S3
+ *    0x1C = RMU40 S4
+ *    0x1E = ???
  *    0x20 = MODBUS40
+ *    0xA4 = EME20
  * 
+ *  Command:
+ *    0x50 = EME20 ?
+ *    0x69 = Read Token
+ *    0x6B = Write Token
+ *    0x60 = RMU Write Token
+ *    0x62 = RMU Data Message
+ *    0x63 = RMU Data Token
+ *    0xEE = Accessory Token
+ *
  *  Checksum: XOR
  *
  * When valid data is received (checksum ok),
@@ -54,9 +68,11 @@ enum eState
 
 enum eTokenType
 {
-  READ_TOKEN,
-  WRITE_TOKEN,
-  RMU_TOKEN
+  READ_TOKEN, // 0x69
+  WRITE_TOKEN, // 0x6B
+  RMU_WRITE_TOKEN, // 0x60
+  RMU_TOKEN, // 0x62
+  EME20_TOKEN,
 };
     
 // message buffer for RS-485 communication. Max message length is 80 bytes + 6 bytes header
@@ -72,6 +88,7 @@ enum eTokenType
 #define SMS40     0x16
 #define RMU40     0x19
 #define MODBUS40  0x20
+#define EME20     0xA4
 
 class NibeGw
 {
